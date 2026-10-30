@@ -1,0 +1,207 @@
+# jobkits kit: freehire — compose file copied VERBATIM from strelov1/freehire
+# at pinned commit def9d6882fc78c1d15b5a4c9f11d502d3c3bb19c (docker-compose.yml).
+# Do not edit casually: bump the pin in kit.json and re-copy instead.
+# This file is NOT run from the jobkits repo. On first start, jobkits clones
+# freehire at the pinned commit into userData/kits/freehire/src and runs
+# compose there (the app/web services build from that source tree). The copy
+# kept here is the reference record of exactly what will be executed.
+#
+services:
+  db:
+    # pgvector's build, not stock postgres: migration 0092 runs `CREATE EXTENSION
+    # vector`, which the stock image doesn't ship. This is Debian-based (bookworm),
+    # not Alpine — pgvector has no Alpine variant — but pins the same Postgres major
+    # (18) as the stock image it replaces, so the version-subdirectory volume
+    # behaviour noted below is unaffected.
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: hire
+      POSTGRES_PASSWORD: hire
+      POSTGRES_DB: hire
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      # postgres:18+ stores data in a version-specific subdirectory and expects
+      # the volume at /var/lib/postgresql (not the legacy .../data path, which it
+      # now treats as an unused mount and refuses to start).
+      - pgdata:/var/lib/postgresql
+      # Migrations are applied automatically by Postgres on first volume init.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hire -d hire"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Search backend for GET /api/v1/jobs/search and the reindex command. The
+  # huggingFace embedder downloads and runs its model inside this container, so
+  # the model is cached in the meilisearch_data volume across restarts.
+  meilisearch:
+    image: getmeili/meilisearch:v1.49.0
+    environment:
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-dev-insecure-meili-key}"
+      MEILI_ENV: development
+    ports:
+      - "${MEILI_HOST_PORT:-7700}:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+
+  # Backs the shared rate limiter (internal/ratelimit). A required dependency, not
+  # an optional one like Meili — no volume, since rate-limit counters are
+  # ephemeral/TTL'd and losing them on restart is a fail-open no-op, not data loss.
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Local S3-compatible storage for résumé upload (internal/blobstore). Without it
+  # `PUT/POST /me/resume` runs with storage disabled (S3_* unset) and callers degrade to
+  # the previous per-request extraction — real locally, but no upload persists, so the
+  # fit analysis never sees a structured résumé. s3-init creates the bucket once and
+  # exits; the app waits on that, not on the server itself, since the bucket must exist
+  # first.
+  #
+  # This was MinIO, pulled from Quay after MinIO deleted the `minio/*` Docker Hub
+  # repositories. On 2026-09-24 Quay started refusing those names too — an anonymous pull
+  # token gets 401 for both `minio/minio` and `minio/mc`, GHCR answers 403 and Bitnami
+  # 404 — so every PR's smoke job failed twelve seconds in, before any code ran. There is
+  # no MinIO image left to pin.
+  #
+  # adobe/s3mock replaces it: an in-memory S3 server, which is all this stack ever wanted
+  # — the smoke job never persists anything across a restart. Its documented
+  # `initialBuckets` env var does NOT create the bucket in the current image (checked,
+  # both spellings), so the bucket is created with a plain PUT, which is also why the
+  # init container no longer needs a vendor CLI. The PUT is guarded by a HEAD: s3mock
+  # answers a second PUT for a bucket it already holds with 409, which `curl -f` reads
+  # as failure, so a bare PUT loops forever whenever s3-init re-runs against a still-
+  # running s3 (a second `docker compose up`) and the app never starts (freehire#3264).
+  # Pinned, like every other image in this file. The change that introduced this service
+  # exists BECAUSE an unpinned upstream moved out from under the smoke job, and shipping
+  # it on `latest` repeated the shape it was fixing.
+  s3:
+    image: adobe/s3mock:5.2.3
+    environment:
+      # Path-style addressing, which is what internal/blobstore uses against a custom
+      # S3_ENDPOINT. No credentials: s3mock accepts any signature.
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+    ports:
+      - "${S3_HOST_PORT:-9000}:9090"
+
+  s3-init:
+    image: curlimages/curl:8.23.0
+    depends_on:
+      - s3
+    entrypoint: >
+      /bin/sh -c "
+      until curl -sfI -o /dev/null http://s3:9090/hire-resumes || curl -sf -o /dev/null -X PUT http://s3:9090/hire-resumes; do sleep 1; done;
+      exit 0;
+      "
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://hire:hire@db:5432/hire?sslmode=disable"
+      # Dev defaults pointing at the local `s3` service above. Prod sets its own
+      # S3_* in its .env, pointing at the real bucket — these values never leave Docker.
+      S3_ENDPOINT: "${S3_ENDPOINT:-http://s3:9090}"
+      S3_BUCKET: "${S3_BUCKET:-hire-resumes}"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-s3mock}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-s3mock}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      # PII_FILTER_URL intentionally has no local default: it fronts a real span-detection
+      # model (services/pii-filter) with no lightweight local stand-in, so unset here is the
+      # correct out-of-the-box state — résumé structuring/import degrade gracefully without
+      # it (internal/resumeextract's Enabled() check), same as an unconfigured LLM.
+      PII_FILTER_URL: "${PII_FILTER_URL:-}"
+      # LLM-backed features (enrich, fit analysis, résumé structuring, the assistant, …)
+      # were silently unreachable locally: these were never passed through from .env at
+      # all, so every model call degraded as "unconfigured" with no error. Empty is a
+      # valid, working default (the same degrade-gracefully behaviour, just intentional
+      # now) — set real values in .env to actually exercise a model-backed surface.
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      # Optional: the assistant's own model, chosen for tool calling rather than
+      # cheap one-shot extraction. Falls back to LLM_MODEL.
+      ASSISTANT_MODEL: "${ASSISTANT_MODEL:-}"
+      # Bullets allowed per experience or project. Unset (or below 1) means 20.
+      # The agent reads the live value into its cv_edit tool description, so
+      # raising this needs no prompt change.
+      CV_MAX_BULLETS: "${CV_MAX_BULLETS:-}"
+      # Fit-analysis sanitize ceilings for untrusted model output (see .env.example).
+      # Empty/unset falls back to internal/matchanalysis's own DefaultBounds — these
+      # were documented in .env.example but never reached the container, so setting
+      # them in .env silently had no effect.
+      MATCH_ANALYSIS_MAX_COMMENT_RUNES: "${MATCH_ANALYSIS_MAX_COMMENT_RUNES:-}"
+      MATCH_ANALYSIS_MAX_LIST_ITEM_RUNES: "${MATCH_ANALYSIS_MAX_LIST_ITEM_RUNES:-}"
+      MATCH_ANALYSIS_MAX_RECOMMEND_RUNES: "${MATCH_ANALYSIS_MAX_RECOMMEND_RUNES:-}"
+      MATCH_ANALYSIS_MAX_REQ_TEXT_RUNES: "${MATCH_ANALYSIS_MAX_REQ_TEXT_RUNES:-}"
+      MATCH_ANALYSIS_MAX_REQ_EVIDENCE_RUNES: "${MATCH_ANALYSIS_MAX_REQ_EVIDENCE_RUNES:-}"
+      MATCH_ANALYSIS_MAX_STRENGTHS: "${MATCH_ANALYSIS_MAX_STRENGTHS:-}"
+      MATCH_ANALYSIS_MAX_GAPS: "${MATCH_ANALYSIS_MAX_GAPS:-}"
+      MATCH_ANALYSIS_MAX_REQUIREMENTS: "${MATCH_ANALYSIS_MAX_REQUIREMENTS:-}"
+      MATCH_ANALYSIS_MAX_SIGNALS: "${MATCH_ANALYSIS_MAX_SIGNALS:-}"
+      MATCH_ANALYSIS_MAX_SIGNAL_QUOTE_RUNES: "${MATCH_ANALYSIS_MAX_SIGNAL_QUOTE_RUNES:-}"
+      MATCH_ANALYSIS_MAX_SIGNAL_INSIGHT_RUNES: "${MATCH_ANALYSIS_MAX_SIGNAL_INSIGHT_RUNES:-}"
+      LANGFUSE_BASE_URL: "${LANGFUSE_BASE_URL:-}"
+      LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
+      LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
+      # Required by the auth surface (server fails fast if unset or under 32 bytes).
+      # Dev default — set a real, random JWT_SECRET in any non-local deployment.
+      JWT_SECRET: "${JWT_SECRET:-dev-insecure-secret-change-me-0123456789}"
+      # OAuth callbacks redirect the browser back to this origin; it also
+      # derives the per-provider callback URL registered at each provider.
+      FRONTEND_ORIGIN: "${FRONTEND_ORIGIN:-http://localhost:5173}"
+      # OAuth sign-in is optional: a provider with empty credentials is simply
+      # disabled (no button in the SPA, its routes 404). Set the values in .env.
+      OAUTH_GOOGLE_CLIENT_ID: "${OAUTH_GOOGLE_CLIENT_ID:-}"
+      OAUTH_GOOGLE_CLIENT_SECRET: "${OAUTH_GOOGLE_CLIENT_SECRET:-}"
+      OAUTH_GITHUB_CLIENT_ID: "${OAUTH_GITHUB_CLIENT_ID:-}"
+      OAUTH_GITHUB_CLIENT_SECRET: "${OAUTH_GITHUB_CLIENT_SECRET:-}"
+      OAUTH_LINKEDIN_CLIENT_ID: "${OAUTH_LINKEDIN_CLIENT_ID:-}"
+      OAUTH_LINKEDIN_CLIENT_SECRET: "${OAUTH_LINKEDIN_CLIENT_SECRET:-}"
+      OAUTH_APPLE_CLIENT_ID: "${OAUTH_APPLE_CLIENT_ID:-}"
+      OAUTH_APPLE_TEAM_ID: "${OAUTH_APPLE_TEAM_ID:-}"
+      OAUTH_APPLE_KEY_ID: "${OAUTH_APPLE_KEY_ID:-}"
+      OAUTH_APPLE_PRIVATE_KEY: "${OAUTH_APPLE_PRIVATE_KEY:-}"
+      # Search is optional: an empty MEILI_MASTER_KEY disables the search
+      # endpoint without affecting the rest of the API.
+      MEILI_URL: "http://meilisearch:7700"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-dev-insecure-meili-key}"
+      REDIS_URL: "redis://redis:6379/0"
+    ports:
+      - "${HIRE_HOST_PORT:-8080}:8080"
+
+  # SvelteKit SSR frontend. nginx (:80) fronts both the Node SSR server and the
+  # Go API, keeping them same-origin for the auth cookie. The browser talks only
+  # to this container.
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        # Public origin for canonical/sitemap/JSON-LD — match the host-facing URL.
+        # A build arg: SvelteKit 3 bakes it in, so changing it means rebuilding.
+        ORIGIN: "${WEB_ORIGIN:-http://localhost:8090}"
+    environment:
+      # The Node SSR server fetches the Go API server-to-server (never relative).
+      API_INTERNAL_URL: "http://app:8080"
+    ports:
+      - "${WEB_HOST_PORT:-8090}:80"
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  meilisearch_data:

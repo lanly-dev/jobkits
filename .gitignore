@@ -1,0 +1,8 @@
+node_modules/
+out/
+.env
+*.log
+# runtime state lives in Electron userData, never in the repo; ignore strays
+jobkits-state.json
+kits/*/src/
+.DS_Store

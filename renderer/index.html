@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jobkits</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="rail">
+    <div class="brand">jobkits</div>
+    <div class="tagline">self-hosted services, as desktop apps — via Podman</div>
+
+    <div id="podmanBanner" class="banner unknown">
+      <div id="podmanTitle">Podman: checking…</div>
+      <div id="podmanDetail" class="banner-detail"></div>
+    </div>
+
+    <div class="rail-label">Kits</div>
+    <div id="kitList"></div>
+
+    <div id="kitPanel" class="hidden">
+      <div class="row2">
+        <button id="btnStart" class="primary">Start</button>
+        <button id="btnStop" disabled>Stop</button>
+      </div>
+      <div class="row2">
+        <button id="btnOpen" disabled>Open in browser</button>
+        <button id="btnWipe" class="danger">Wipe data…</button>
+      </div>
+      <div id="phase" class="phase"></div>
+
+      <div class="rail-label">Services</div>
+      <div id="services"></div>
+
+      <div class="rail-label">Ports</div>
+      <div id="ports" class="ports"></div>
+
+      <details id="settingsBox">
+        <summary>LLM settings (optional)</summary>
+        <p class="hint">Used by freehire's CV / fit-analysis features. Leave empty to disable them — everything else works.</p>
+        <label>Base URL <input id="llmBase" placeholder="https://api.openai.com/v1 or http://localhost:11434/v1"></label>
+        <label>API key <input id="llmKey" type="password" placeholder="(stored locally in jobkits state)"></label>
+        <label>Model <input id="llmModel" placeholder="gpt-4o-mini"></label>
+        <button id="btnSaveSettings">Save settings</button>
+        <div id="settingsMsg" class="hint"></div>
+      </details>
+    </div>
+
+    <div class="rail-block grow"></div>
+    <div class="rail-label">Logs <button id="btnClearLog" class="mini">clear</button></div>
+    <pre id="log"></pre>
+  </aside>
+
+  <main id="main">
+    <div id="placeholder">
+      <h2>No kit running</h2>
+      <p>Pick a kit on the left and press <b>Start</b>. jobkits will clone the kit's
+      upstream source at its pinned commit, generate its secrets and ports, bring its
+      stack up with Podman, and load its web UI here once it's healthy.</p>
+      <p class="hint">First start is slow: image pulls + a from-source build can take several minutes.</p>
+    </div>
+    <webview id="kitView" class="hidden" partition="persist:jobkits-kit"></webview>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
