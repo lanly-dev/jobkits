@@ -12,6 +12,7 @@ const path = require('node:path');
 const kits = require('../lib/kits');
 const envfile = require('../lib/envfile');
 const health = require('../lib/health');
+const podmanLib = require('../lib/podman');
 
 (async () => {
   // ---- kits: the bundled freehire kit loads and validates
@@ -110,12 +111,80 @@ const health = require('../lib/health');
       const logs = await podman.composeLogs(ctx);
       assert.strictEqual(logs.reason, 'podman-not-found');
       assert.strictEqual((await podman.ensureMachine()).reason, 'podman-not-found');
+      // v0.2 machine functions degrade the same way, never throw
+      assert.strictEqual((await podman.machineInspect()).reason, 'podman-not-found');
+      assert.strictEqual((await podman.machineInit({ cpus: 2, memoryMiB: 4096, diskSizeGiB: 30 })).reason, 'podman-not-found');
+      assert.strictEqual((await podman.machineSet({ cpus: 2 })).reason, 'podman-not-found');
+      assert.strictEqual((await podman.machineStop()).reason, 'podman-not-found');
+      assert.strictEqual((await podman.machineStart()).reason, 'podman-not-found');
       console.log('podman-missing graceful path: ok');
     }
   } finally {
     process.env.PATH = savedPath;
     if (savedJobkitsPodman !== undefined) process.env.JOBKITS_PODMAN = savedJobkitsPodman;
   }
+
+  // ---- machine config (v0.2): hostInfo + pure validation
+  const hi = podmanLib.hostInfo();
+  assert.strictEqual(hi.cpus, os.cpus().length);
+  assert.ok(hi.totalMemMiB > 0);
+  assert.strictEqual(hi.freeDiskHint, null);
+  const HOST = { cpus: 8, totalMemMiB: 32768 };
+  const good = { cpus: 4, memoryMiB: 8192, diskSizeGiB: 50, rootful: false, now: true };
+  assert.strictEqual(podmanLib.validateMachineConfig(good, HOST).ok, true);
+  for (const badCfg of [
+    { ...good, cpus: 0 }, { ...good, cpus: 9 }, { ...good, cpus: 2.5 },
+    { ...good, memoryMiB: 512 }, { ...good, memoryMiB: 65536 },
+    { ...good, diskSizeGiB: 5 }, { ...good, name: 'bad name!' },
+  ]) {
+    const v = podmanLib.validateMachineConfig(badCfg, HOST);
+    assert.strictEqual(v.ok, false, 'should reject ' + JSON.stringify(badCfg));
+    assert.strictEqual(v.reason, 'invalid-config');
+    assert.ok(v.errors.length >= 1);
+  }
+  console.log('machine validateMachineConfig: ok');
+
+  // ---- machine config: buildInitArgs exact argv
+  const initSample = { name: 'jk-test', cpus: 4, memoryMiB: 8192, diskSizeGiB: 50, rootful: true, now: true };
+  const initRes = podmanLib.buildInitArgs(initSample, HOST);
+  assert.strictEqual(initRes.ok, true);
+  assert.deepStrictEqual(initRes.args, ['machine', 'init', '--cpus', '4', '--memory', '8192', '--disk-size', '50', '--rootful', '--timezone', 'local', '--now', 'jk-test']);
+  const initRootless = podmanLib.buildInitArgs({ ...initSample, rootful: false, now: false, name: undefined }, HOST);
+  assert.ok(!initRootless.args.includes('--rootful'), 'rootless must not pass --rootful');
+  assert.ok(!initRootless.args.includes('--now'));
+  assert.strictEqual(initRootless.args[initRootless.args.indexOf('--timezone') + 1], 'local', 'timezone defaults to local');
+  assert.deepStrictEqual(podmanLib.buildInitArgs({ ...good, cpus: 99 }, HOST).reason, 'invalid-config');
+  console.log('machine buildInitArgs: ok');
+
+  // ---- machine config: buildSetArgs diffs only, disk grow-only
+  const current = { exists: true, name: 'podman-machine-default', cpus: 4, memoryMiB: 8192, diskSizeGiB: 50, rootful: false };
+  const noChange = podmanLib.buildSetArgs({ cpus: 4, memoryMiB: 8192, diskSizeGiB: 50, rootful: false }, current);
+  assert.strictEqual(noChange.ok, true);
+  assert.strictEqual(noChange.noOp, true);
+  assert.strictEqual(noChange.args, null);
+  const ramOnly = podmanLib.buildSetArgs({ memoryMiB: 16384 }, current);
+  assert.deepStrictEqual(ramOnly.args, ['machine', 'set', '--memory', '16384', 'podman-machine-default']);
+  const shrink = podmanLib.buildSetArgs({ diskSizeGiB: 30 }, current);
+  assert.strictEqual(shrink.ok, false);
+  assert.strictEqual(shrink.reason, 'invalid-config');
+  assert.ok(shrink.errors.join(' ').includes('only grow'));
+  const grow = podmanLib.buildSetArgs({ diskSizeGiB: 100 }, current);
+  assert.deepStrictEqual(grow.args.slice(0, 4), ['machine', 'set', '--disk-size', '100']);
+  const flip = podmanLib.buildSetArgs({ rootful: false }, { ...current, rootful: true });
+  assert.ok(flip.args.includes('--rootful=false'), 'rootful flip off must be explicit');
+  const flipOn = podmanLib.buildSetArgs({ rootful: true }, current);
+  assert.ok(flipOn.args.includes('--rootful=true'));
+  assert.strictEqual(podmanLib.buildSetArgs({ cpus: 2 }, { exists: false }).reason, 'machine-missing');
+  console.log('machine buildSetArgs: ok');
+
+  // ---- machine inspect normalization (both field shapes)
+  const n1 = podmanLib.normalizeMachineInspect({ Name: 'm1', Rootful: true, State: 'running', LastUp: '2026-10-29T00:00:00Z', Resources: { CPUs: 4, Memory: 8192, DiskSize: 50 } });
+  assert.deepStrictEqual([n1.name, n1.cpus, n1.memoryMiB, n1.diskSizeGiB, n1.rootful, n1.running], ['m1', 4, 8192, 50, true, true]);
+  const n2 = podmanLib.normalizeMachineInspect({ Name: 'm2', CPUs: 2, Memory: '4096MB', DiskSize: '100GB', Running: false });
+  assert.deepStrictEqual([n2.cpus, n2.memoryMiB, n2.diskSizeGiB, n2.running, n2.state], [2, 4096, 100, false, 'stopped']);
+  const n3 = podmanLib.normalizeMachineInspect({ Name: 'm3' });
+  assert.deepStrictEqual([n3.cpus, n3.memoryMiB, n3.diskSizeGiB, n3.rootful], [null, null, null, null]);
+  console.log('machine normalizeMachineInspect: ok');
 
   // ---- health: instant failure against a closed port, success vs stub
   const closed = await health.waitForHealth({ port: 1, healthPath: '/health', timeoutMs: 300, intervalMs: 50 });

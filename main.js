@@ -138,6 +138,28 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('podman:status', () => podman.getStatus());
 
+  /* --- Podman machine wizard + settings GUI (v0.2) ---
+   * Init/set are user-driven from the GUI (Start never auto-inits). Both
+   * stream output lines as 'machine:log' and state as 'machine:progress'. */
+  let machineBusy = false;
+  const machineLog = (op) => ({ stream, line }) => send('machine:log', { op, stream, line });
+  async function machineOp(op, fn) {
+    if (machineBusy) return { ok: false, reason: 'busy', guidance: 'Another machine operation is already in progress.' };
+    machineBusy = true;
+    send('machine:progress', { op, state: 'running' });
+    try {
+      const r = await fn();
+      send('machine:progress', { op, state: r && r.ok ? 'done' : 'failed', reason: (r && r.reason) || null });
+      return r;
+    } finally { machineBusy = false; }
+  }
+  ipcMain.handle('podman:hostInfo', () => podman.hostInfo());
+  ipcMain.handle('podman:machineInspect', (_e, name) => podman.machineInspect(name || undefined));
+  ipcMain.handle('podman:machineInit', (_e, cfg) => machineOp('init', () => podman.machineInit(cfg || {}, machineLog('init'))));
+  ipcMain.handle('podman:machineSet', (_e, cfg) => machineOp('set', () => podman.machineSet(cfg || {}, machineLog('set'))));
+  ipcMain.handle('podman:machineStop', (_e, name) => machineOp('stop', () => podman.machineStop(name || undefined)));
+  ipcMain.handle('podman:machineStart', (_e, name) => machineOp('start', () => podman.machineStart(name || undefined)));
+
   ipcMain.handle('kit:ps', async (_e, id) => {
     const ctx = await kitContext(id);
     if (!fs.existsSync(ctx.srcDir)) return { ok: true, services: [], note: 'not started yet' };
@@ -198,7 +220,14 @@ app.whenReady().then(async () => {
   if (SMOKE) {
     const status = await podman.getStatus();
     const list = kits.listKits().map(k => k.id);
-    console.log('[jobkits-smoke] podman found=' + status.found + ' reason=' + (status.reason || 'n/a') + ' kits=' + JSON.stringify(list));
+    // exercise the v0.2 machine paths under (possibly) missing podman: they
+    // must resolve gracefully, never throw, so the wizard can render.
+    const host = podman.hostInfo();
+    const insp = await podman.machineInspect();
+    const initTry = await podman.machineInit({ cpus: 1, memoryMiB: 1024, diskSizeGiB: 10 });
+    const setTry = await podman.machineSet({ cpus: 1 });
+    console.log('[jobkits-smoke] podman found=' + status.found + ' reason=' + (status.reason || 'n/a') + ' kits=' + JSON.stringify(list)
+      + ' hostCpus=' + host.cpus + ' inspect=' + (insp.ok ? 'ok' : insp.reason) + ' init=' + (initTry.ok ? 'ok' : initTry.reason) + ' set=' + (setTry.ok ? 'ok' : setTry.reason));
     setTimeout(() => { console.log('[jobkits-smoke] OK — quitting'); app.quit(); }, 3000);
   }
 });

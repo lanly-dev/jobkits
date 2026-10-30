@@ -16,6 +16,59 @@
       <div id="podmanDetail" class="banner-detail"></div>
     </div>
 
+    <section id="machinePanel" class="panel hidden">
+      <!-- First-run wizard: shown when no Podman machine exists (win/mac) -->
+      <div id="wizardBox" class="hidden">
+        <div class="panel-title">Set up Podman machine</div>
+        <p class="hint">Podman runs containers in a small Linux VM. Create it here —
+        no terminal needed. The first create downloads the VM image and takes a few minutes.</p>
+        <div class="preset-row" id="wizPresets">
+          <label class="preset"><input type="radio" name="wizPreset" value="light"> Light<br><span>2 CPU · 4 GiB · 30 GiB</span></label>
+          <label class="preset"><input type="radio" name="wizPreset" value="recommended" checked> Recommended<br><span>4 CPU · 8 GiB · 50 GiB</span></label>
+          <label class="preset"><input type="radio" name="wizPreset" value="power"> Power<br><span>8 CPU · 16 GiB · 100 GiB</span></label>
+        </div>
+        <div id="wizClampNote" class="hint warn-text hidden"></div>
+        <label class="slider-row">CPUs <span id="wizCpuVal" class="slider-val"></span>
+          <input type="range" id="wizCpu" min="1" max="4" step="1" value="4"></label>
+        <label class="slider-row">Memory <span id="wizMemVal" class="slider-val"></span>
+          <input type="range" id="wizMem" min="1" max="8" step="1" value="8"></label>
+        <label class="slider-row">Disk <span id="wizDiskVal" class="slider-val"></span>
+          <input type="range" id="wizDisk" min="10" max="500" step="5" value="50"></label>
+        <label class="check-row"><input type="checkbox" id="wizRootful"> Rootful mode
+          <span class="hint">— containers run as root inside the VM. Leave off (rootless) unless a kit needs it; it's the safer default.</span></label>
+        <label class="check-row"><input type="checkbox" id="wizNow" checked> Start the machine after creating it</label>
+        <div id="wizError" class="error-text hidden"></div>
+        <button id="btnCreateMachine" class="primary wide">Create machine</button>
+        <div id="wizProgress" class="phase"></div>
+      </div>
+
+      <!-- Machine settings: shown when a machine exists -->
+      <div id="machineSettingsBox" class="hidden">
+        <div class="panel-title">Podman machine</div>
+        <div id="machineCurrent" class="machine-current"></div>
+        <label class="slider-row">CPUs <span id="setCpuVal" class="slider-val"></span>
+          <input type="range" id="setCpu" min="1" max="4" step="1" value="4"></label>
+        <label class="slider-row">Memory <span id="setMemVal" class="slider-val"></span>
+          <input type="range" id="setMem" min="1" max="8" step="1" value="8"></label>
+        <label class="slider-row">Disk (GiB) — can only grow <span id="setDiskVal" class="slider-val"></span>
+          <input type="range" id="setDisk" min="10" max="500" step="5" value="50"></label>
+        <label class="check-row"><input type="checkbox" id="setRootful"> Rootful mode
+          <span class="hint">— containers run as root inside the VM.</span></label>
+        <label class="check-row"><input type="checkbox" id="setRestart" checked> Restart the machine after applying</label>
+        <div id="setError" class="error-text hidden"></div>
+        <div id="setStopConfirm" class="hidden">
+          <p class="hint warn-text">The machine must be stopped to change settings. Running kits will stop with it.</p>
+          <button id="btnStopApply" class="primary wide">Stop machine &amp; apply</button>
+        </div>
+        <button id="btnApplyMachine" class="wide">Apply changes</button>
+        <div id="setMsg" class="phase"></div>
+      </div>
+
+      <pre id="machineLog" class="machine-log hidden"></pre>
+    </section>
+
+    <div id="machineLinuxNote" class="hint hidden">Podman on Linux runs without a VM — no machine setup needed.</div>
+
     <div class="rail-label">Kits</div>
     <div id="kitList"></div>
 

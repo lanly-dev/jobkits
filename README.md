@@ -10,17 +10,17 @@ search engine (3.3M+ postings straight from company ATS career pages, CV builder
 fit analysis, application tracking). Later kits are drop-in folders; see
 *Adding a kit* below.
 
+Version 0.2.0 — adds a VirtualBox-style GUI for the Podman machine: a first-run
+setup wizard and a machine settings panel, so no terminal is needed anywhere.
+
 ## Prerequisites
 
 - **Podman** — install from https://podman.io/docs/installation
-  - **Windows:** after installing, run once in a terminal:
-    ```
-    podman machine init
-    podman machine start
-    ```
-    (Podman on Windows runs containers in a small Linux VM — the "machine".
-    jobkits starts a stopped machine for you, but the one-time `init` download
-    is yours.) The same applies on macOS.
+  - **Windows/macOS:** that's the only manual step. Podman runs containers in a
+    small Linux VM — the "machine" — and jobkits creates it for you with the
+    built-in setup wizard (see *Podman machine GUI* below). Starting a kit never
+    auto-creates a machine; creation is always wizard-driven, because it
+    downloads a VM image and takes a few minutes.
   - **Linux:** no machine needed; a system podman is enough.
   - Compose support needs Podman ≥ 4.7 (`podman compose`) or a `podman-compose`
     binary on PATH. jobkits prefers `podman compose`, because freehire's compose
@@ -46,7 +46,9 @@ For the selected kit, Start does:
    `userData/jobkits-state.json`; secrets and ports never change afterwards.
    Optional LLM settings from the UI (`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`)
    are passed through for freehire's CV / fit-analysis features.
-3. **Machine** — on Windows/macOS, `podman machine start` if stopped.
+3. **Machine** — on Windows/macOS, `podman machine start` if stopped. If no
+   machine exists, Start stops with guidance pointing at the setup wizard —
+   it never runs `machine init` itself.
 4. **Up** — `podman compose up -d --build`, output streamed to the log pane.
 5. **Health** — poll `http://127.0.0.1:<healthPort><healthPath>` (freehire:
    `:8080/health`) for up to ~5 minutes, then load
@@ -55,6 +57,24 @@ For the selected kit, Start does:
 Stop runs `compose down`. **Wipe data** runs `compose down -v` (deletes the
 kit's database/search/storage volumes; the source checkout and jobkits state
 are kept), after a confirmation dialog.
+
+## Podman machine GUI (Windows/macOS)
+
+- **Setup wizard** — when Podman is installed but no machine exists, the app
+  shows a "Set up Podman machine" panel instead of terminal instructions:
+  presets (Light 2 CPU / 4 GiB / 30 GiB · Recommended 4 / 8 / 50 · Power
+  8 / 16 / 100 — clamped to what your PC actually has), sliders for CPUs,
+  memory and disk, a rootful toggle (off = rootless, the safer default) and a
+  "start after creating" option. **Create machine** runs
+  `podman machine init --cpus … --memory … --disk-size …` with the output
+  streamed into the panel's log.
+- **Machine settings** — when a machine exists, the panel shows its current
+  CPUs / memory / disk / root mode (read back via `podman machine inspect`)
+  and lets you edit them. Disk size **can only grow** — Podman cannot shrink
+  a machine disk — so the disk slider's minimum is the current size. Settings
+  can only change while the machine is stopped: if it's running, Apply asks
+  first, then jobkits stops it, runs `podman machine set` with only the
+  changed values, and (by default) starts it again.
 
 ## Kits
 

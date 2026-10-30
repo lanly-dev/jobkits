@@ -47,6 +47,24 @@ code { color: #9fc0ee; }
 #settingsBox { background: #101726; border: 1px solid #1d2740; border-radius: 8px; padding: 8px 12px; }
 #settingsBox summary { cursor: pointer; font-weight: 600; }
 
+/* --- machine wizard + settings (v0.2) --- */
+.panel { background: #101726; border: 1px solid #2c3a58; border-radius: 8px; padding: 10px 12px; }
+.panel-title { font-weight: 700; font-size: 14px; color: #eef3fc; }
+.panel button.wide { width: 100%; margin-top: 8px; }
+.preset-row { display: flex; gap: 8px; margin: 8px 0; }
+.preset { flex: 1; background: #0e1420; border: 1px solid #2c3a58; border-radius: 6px; padding: 6px 8px; cursor: pointer; color: #dbe2ee; font-size: 12px; }
+.preset span { color: #8494ad; font-size: 11px; }
+.slider-row { margin: 4px 0; }
+.slider-row input[type="range"] { width: 100%; margin: 2px 0 6px; accent-color: #3a619c; }
+.slider-val { color: #e8c97a; font-weight: 600; float: right; }
+.check-row { margin: 6px 0; color: #dbe2ee; font-size: 12px; }
+.check-row input { width: auto; margin: 0 6px 0 0; }
+.check-row .hint { display: inline; }
+.warn-text { color: #e8c97a; }
+.error-text { color: #f0b6c0; background: #241118; border: 1px solid #673240; border-radius: 6px; padding: 7px 9px; font-size: 12px; white-space: pre-wrap; margin: 8px 0; }
+.machine-current { color: #9fb4d0; font-size: 12px; margin: 4px 0 8px; word-break: break-word; }
+.machine-log { background: #070a10; border: 1px solid #1d2740; border-radius: 6px; padding: 8px; height: 120px; overflow-y: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; }
+
 #log { background: #070a10; border: 1px solid #1d2740; border-radius: 6px; padding: 8px; height: 180px; flex: 0 0 180px; overflow-y: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin: 0; }
 
 #main { flex: 1; display: flex; }
