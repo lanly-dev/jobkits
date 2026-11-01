@@ -6,3 +6,4 @@ out/
 jobkits-state.json
 kits/*/src/
 .DS_Store
+package-lock.json
