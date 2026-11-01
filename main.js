@@ -159,6 +159,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('podman:machineSet', (_e, cfg) => machineOp('set', () => podman.machineSet(cfg || {}, machineLog('set'))));
   ipcMain.handle('podman:machineStop', (_e, name) => machineOp('stop', () => podman.machineStop(name || undefined)));
   ipcMain.handle('podman:machineStart', (_e, name) => machineOp('start', () => podman.machineStart(name || undefined)));
+   let installBusy = false;
+   ipcMain.handle('podman:install', async (_e, cfg) => {
+     if (installBusy) return { ok: false, reason: 'busy', guidance: 'A Podman installation is already in progress.' };
+     installBusy = true;
+     send('machine:progress', { op: 'install', state: 'running' });
+     try {
+       const r = await podman.installPodman(cfg || {}, ({ stream, line }) => send('machine:log', { op: 'install', stream: stream || 'stdout', line }));
+       send('machine:progress', { op: 'install', state: (r && r.ok) ? 'done' : 'failed', reason: (r && r.reason) || null });
+       return r;
+     } finally { installBusy = false; }
+   });
+
+
 
   ipcMain.handle('kit:ps', async (_e, id) => {
     const ctx = await kitContext(id);

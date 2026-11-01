@@ -20,11 +20,13 @@ async function refreshBanner() {
   const b = $('podmanBanner');
   const s = await window.j.podmanStatus();
   b.classList.remove('ok', 'bad', 'warn');
+  $('btnInstallPodman').classList.add('hidden');
   if (!s.found) {
     b.classList.add('bad');
     $('podmanTitle').textContent = '● Podman not found';
     $('podmanDetail').innerHTML = 'jobkits needs Podman to run kits. Install it from ' +
       '<a href="https://podman.io/docs/installation" target="_blank" rel="noreferrer">podman.io/docs/installation</a>, then restart jobkits.';
+    $('btnInstallPodman').classList.remove('hidden');
     $('machinePanel').classList.add('hidden');
     return s;
   }
@@ -358,6 +360,24 @@ window.j.onMachineLog(({ line }) => {
 window.j.onMachineProgress(({ op, state }) => {
   if (op === 'init') $('wizProgress').textContent = state === 'running' ? 'Creating machine…' : (state === 'done' ? 'Machine created.' : 'Machine creation failed.');
   if (op === 'set' && state === 'running') $('setMsg').textContent = 'Applying…';
+$('btnInstallPodman').addEventListener('click', async () => {
+  $('btnInstallPodman').disabled = true;
+  $('podmanDetail').textContent = 'Installing Podman… this may take a few minutes.';
+  try {
+    const r = await window.j.installPodman();
+    if (r && r.ok) {
+      $('podmanDetail').textContent = 'Podman installed. Restarting check…';
+    } else {
+      $('podmanDetail').innerHTML = 'Install failed: ' + ((r && (r.guidance || r.reason)) || 'unknown') + '<br>See <a href="https://podman.io/docs/installation" target="_blank">podman.io/docs/installation</a>.';
+    }
+  } catch (e) {
+    $('podmanDetail').textContent = 'Install failed: ' + e;
+  }
+  $('btnInstallPodman').disabled = false;
+  await refreshBanner();
+});
+
+
 });
 
 init();

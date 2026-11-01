@@ -15,7 +15,9 @@ setup wizard and a machine settings panel, so no terminal is needed anywhere.
 
 ## Prerequisites
 
-- **Podman** — install from https://podman.io/docs/installation
+- **Podman** — jobkits can install it for you from the app when it's missing
+  (see the "Install Podman automatically" button), or install manually from
+  https://podman.io/docs/installation
   - **Windows/macOS:** that's the only manual step. Podman runs containers in a
     small Linux VM — the "machine" — and jobkits creates it for you with the
     built-in setup wizard (see *Podman machine GUI* below). Starting a kit never

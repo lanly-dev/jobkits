@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('j', {
   machineSet: (cfg) => ipcRenderer.invoke('podman:machineSet', cfg),
   machineStop: (name) => ipcRenderer.invoke('podman:machineStop', name),
   machineStart: (name) => ipcRenderer.invoke('podman:machineStart', name),
+   installPodman: (cfg) => ipcRenderer.invoke('podman:install', cfg),
   onLog: (cb) => ipcRenderer.on('kit:log', (_e, m) => cb(m)),
   onState: (cb) => ipcRenderer.on('kit:state', (_e, m) => cb(m)),
   onMachineLog: (cb) => ipcRenderer.on('machine:log', (_e, m) => cb(m)),
